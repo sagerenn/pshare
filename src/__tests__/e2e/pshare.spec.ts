@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * End-to-end browser tests for pshare. These run against the real Next.js app
- * backed by a real openlist-ext binary (booted in global-setup). They cover
- * the user-facing journeys: sharing text, sharing a file/image, opening a
- * share link, and seeing an expired share.
+ * End-to-end browser tests for pshare. These run against the real static
+ * export (built with a provisioned OpenList API key) backed by a real
+ * openlist-ext binary (booted in global-setup). They cover the user-facing
+ * journeys: sharing text, sharing a file/image, opening a share link, and
+ * seeing an unavailable share.
  */
 
 test.describe("pshare home page", () => {
@@ -25,7 +26,7 @@ test.describe("pshare home page", () => {
     const urlInput = page.locator(".result-url input");
     await expect(urlInput).toBeVisible();
     const url = await urlInput.inputValue();
-    expect(url).toMatch(/\/s\/[a-z2-7]{10}$/);
+    expect(url).toMatch(/\/s\?id=[a-z2-7]{10}&name=paste\.txt$/);
 
     // The result meta mentions the type.
     await expect(page.locator(".result-meta")).toContainText("text");
@@ -34,13 +35,11 @@ test.describe("pshare home page", () => {
 
 test.describe("opening a share link", () => {
   test("shows the text content on the share page", async ({ page }) => {
-    // Create a share via the UI on one tab.
     await page.goto("/");
     await page.locator("textarea").fill("viewable text content");
     await page.getByRole("button", { name: "Create share" }).click();
     const url = await page.locator(".result-url input").inputValue();
 
-    // Open the share link in a new page context.
     const view = await page.context().newPage();
     await view.goto(url);
     await expect(view.locator("h1")).toHaveText("pshare");
@@ -49,7 +48,6 @@ test.describe("opening a share link", () => {
   });
 
   test("renders an image share inline", async ({ page }) => {
-    // A 2x2 red PNG.
     const png = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADklEQVR42mP8z8BQzwAEYAFn0lpeFQAAAABJRU5ErkJggg==",
       "base64",
@@ -69,33 +67,29 @@ test.describe("opening a share link", () => {
     const url = await page.locator(".result-url input").inputValue();
     const view = await page.context().newPage();
     await view.goto(url);
-    // An <img> media element is rendered.
     await expect(view.locator("img.media")).toBeVisible();
     await expect(view.locator("img.media")).toHaveAttribute("src", /sign=/);
     await view.close();
   });
 
   test("shows an unavailable message for a non-existent share", async ({ page }) => {
-    await page.goto("/s/doesnotexist");
+    // A share id that was never uploaded; the share view fetches the file and
+    // renders the "expired or been deleted" message.
+    await page.goto("/s?id=doesnotexist&name=ghost.txt");
     await expect(page.locator("h2")).toHaveText("Unavailable");
-    await expect(page.locator(".muted")).toContainText("doesn't exist");
+    await expect(page.locator(".muted")).toContainText(/expired|deleted|not found/i);
   });
 
-  test("shows an expired message after the share expires", async ({ page }) => {
-    // Create a share with the shortest TTL (10 minutes is the preset min, so
-    // we instead create with default TTL and force-expire via the API is not
-    // possible from the browser; use the 10-minute preset and verify the
-    // page renders normally first, then trust the integration test for the
-    // 410 path). Here we just confirm a fresh share is viewable.
+  test("creates a share with a per-file TTL and views it", async ({ page }) => {
     await page.goto("/");
-    await page.locator("textarea").fill("not yet expired");
-    // Pick the 10 minutes preset.
+    await page.locator("textarea").fill("short lived");
+    // Pick the 10 minutes preset (per-file X-Ttl override).
     await page.locator("select").first().selectOption("600");
     await page.getByRole("button", { name: "Create share" }).click();
     const url = await page.locator(".result-url input").inputValue();
     const view = await page.context().newPage();
     await view.goto(url);
-    await expect(view.locator(".text-view")).toHaveText("not yet expired");
+    await expect(view.locator(".text-view")).toHaveText("short lived");
     await view.close();
   });
 });
@@ -111,6 +105,21 @@ test.describe("download button", () => {
     const dl = view.locator("a.download-btn");
     await expect(dl).toBeVisible();
     await expect(dl).toHaveAttribute("href", /sign=/);
+    await view.close();
+  });
+});
+
+test.describe("delete button", () => {
+  test("deletes a share from the share page", async ({ page }) => {
+    await page.goto("/");
+    await page.locator("textarea").fill("delete me please");
+    await page.getByRole("button", { name: "Create share" }).click();
+    const url = await page.locator(".result-url input").inputValue();
+
+    const view = await page.context().newPage();
+    await view.goto(url);
+    await view.getByRole("button", { name: "Delete" }).click();
+    await expect(view.getByText("Deleted.")).toBeVisible();
     await view.close();
   });
 });

@@ -1,9 +1,12 @@
 /**
  * Pure helpers for share creation: media-type detection, id generation, and
- * expiry computation. Kept separate from I/O so they can be unit-tested with
- * no database or network.
+ * byte formatting. Kept separate from I/O so they can be unit-tested with
+ * no network. Expiry and download-limit logic live on the OpenList side
+ * (per-user TTL + per-file X-Ttl override), so there is no client-side
+ * expiry math here.
  */
-import type { ShareType } from "./share-store";
+
+export type ShareType = "text" | "file" | "image" | "video" | "audio";
 
 /** MIME prefixes that map to each media type. Order matters: image/video/audio
  *  are checked before the generic "file" fallback. */
@@ -20,10 +23,21 @@ const EXT_RULES: Record<string, Exclude<ShareType, "text" | "file">> = {
   mp3: "audio", wav: "audio", ogg: "audio", flac: "audio", aac: "audio", m4a: "audio", opus: "audio",
 };
 
+/** Extensions that should render as inline text in the share viewer. */
+const TEXT_EXTS = new Set([
+  "txt", "md", "markdown", "log", "csv", "tsv", "json", "xml", "yaml", "yml",
+  "ini", "toml", "conf", "cfg", "env", "sh", "bash", "zsh", "fish", "ps1",
+  "js", "ts", "jsx", "tsx", "py", "rb", "go", "rs", "java", "kt", "c", "h",
+  "cpp", "hpp", "cs", "php", "pl", "lua", "r", "sql", "html", "htm", "css",
+  "scss", "less", "svg", "bat", "cmd", "psm1", "psd1",
+]);
+
 /**
  * Detect the share type from a MIME type and file name. Text content sent
- * without a file is classified as "text"; anything we can't classify falls
- * back to "file".
+ * without a file is classified as "text"; a text/* MIME or a known text
+ * extension also renders as inline text so that a shared `paste.txt` (or an
+ * uploaded `.md`/`.json`/etc.) shows its contents in the viewer rather than
+ * a bare download card. Anything else falls back to "file".
  */
 export function detectType(mime: string, name: string, isText = false): ShareType {
   if (isText) return "text";
@@ -31,10 +45,15 @@ export function detectType(mime: string, name: string, isText = false): ShareTyp
   for (const rule of MIME_RULES) {
     if (m.startsWith(rule.prefix)) return rule.type;
   }
+  // text/* MIME (e.g. text/plain, text/markdown, application/json) renders as
+  // inline text. image/video/audio were already handled above by MIME_RULES,
+  // so a text/* MIME here is genuinely text.
+  if (m.startsWith("text/") || m === "application/json" || m === "application/xml") {
+    return "text";
+  }
   const ext = (name.split(".").pop() || "").toLowerCase();
   if (EXT_RULES[ext]) return EXT_RULES[ext];
-  // text/* MIME (e.g. text/plain, text/markdown) but with a file name => file.
-  if (m.startsWith("text/")) return "file";
+  if (TEXT_EXTS.has(ext)) return "text";
   return "file";
 }
 
@@ -55,31 +74,18 @@ export function generateId(rand: () => number = Math.random): string {
   return out;
 }
 
-/** Preset expiry options offered to the uploader (value in seconds). */
+/**
+ * Preset expiry options offered to the uploader (value in seconds). The
+ * selected value is sent as the per-file X-Ttl header; 0 means "use the
+ * OpenList user's default TTL".
+ */
 export const EXPIRY_PRESETS = [
+  { label: "default", seconds: 0 },
   { label: "10 minutes", seconds: 600 },
   { label: "1 hour", seconds: 3600 },
   { label: "1 day", seconds: 86_400 },
   { label: "7 days", seconds: 604_800 },
 ] as const;
-
-/** Compute the absolute expiry timestamp (epoch ms) for a TTL in seconds. */
-export function computeExpiry(ttlSeconds: number, now = Date.now()): number {
-  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
-    throw new Error(`invalid ttl: ${ttlSeconds}`);
-  }
-  return now + ttlSeconds * 1000;
-}
-
-/** Preset download-limit options offered to the uploader. */
-export const DOWNLOAD_LIMIT_PRESETS = [0, 1, 5, 10, 100] as const;
-
-/** True if a share is expired or has hit its download limit. */
-export function isExpired(share: { expires_at: number; max_downloads: number; downloads: number }, now = Date.now()): boolean {
-  if (share.expires_at <= now) return true;
-  if (share.max_downloads > 0 && share.downloads >= share.max_downloads) return true;
-  return false;
-}
 
 /** Format a byte count as a human-readable string (B / KB / MB / GB). */
 export function formatBytes(n: number): string {
@@ -87,4 +93,20 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/**
+ * Sanitize a file name for use as an OpenList path segment: keep word chars,
+ * dots, and dashes; replace everything else with underscore. This avoids path
+ * traversal and odd characters in the share URL.
+ *
+ * A result that is empty or only dots (e.g. input ".." or "...") would be a
+ * traversal segment, so it falls back to the default name.
+ */
+export function sanitizeName(name: string): string {
+  const cleaned = (name || "").replace(/[^\w.\-]+/g, "_");
+  // Require at least one alphanumeric char so the segment can't be empty,
+  // all-dots, or a lone underscore (\w includes _, so test for [a-z0-9]).
+  if (!/[a-z0-9]/i.test(cleaned)) return "upload.bin";
+  return cleaned;
 }

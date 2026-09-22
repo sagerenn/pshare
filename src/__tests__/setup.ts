@@ -1,27 +1,20 @@
 /**
- * Global test setup. Points pshare at an isolated temp data dir so unit
- * tests that touch the DB never clobber a real one.
+ * Global test setup for unit tests. The static-site client reads config from
+ * NEXT_PUBLIC_* env vars (inlined at build time in production, but read from
+ * process.env in tests), so each test gets a known config. There is no DB and
+ * no runtime — pshare is a static site.
  */
-import { beforeEach, afterAll } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { beforeEach } from "vitest";
 import { resetConfig } from "@/lib/config";
-import { resetRuntime } from "@/lib/runtime";
-import { resetDbHandle } from "@/lib/share-store";
-
-const tmp = mkdtempSync(path.join(tmpdir(), "pshare-test-"));
 
 beforeEach(() => {
-  // Each test gets a fresh config pointing at the shared temp dir. DB files
-  // are per-test (created in openDb) so tests stay isolated.
-  process.env.PSHARE_DB = path.join(tmp, `test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-  process.env.OPENLIST_BASE_URL = "http://127.0.0.1:1"; // unused by unit tests
+  // A known config for unit tests. The openlist-client unit tests inject their
+  // own fetch, so the base URL / key here are just placeholders.
+  process.env.NEXT_PUBLIC_OPENLIST_BASE_URL = "http://ol.test";
+  process.env.NEXT_PUBLIC_OPENLIST_API_KEY = "test-secret-key";
+  process.env.NEXT_PUBLIC_OPENLIST_MOUNT_PATH = "/pshare";
+  process.env.NEXT_PUBLIC_PSHARE_MAX_BYTES = "104857600";
+  process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL = "86400";
+  process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL = "1 day";
   resetConfig();
-  resetRuntime();
-  resetDbHandle();
-});
-
-afterAll(() => {
-  resetRuntime();
 });
