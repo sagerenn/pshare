@@ -108,11 +108,57 @@ async function waitForHealth(baseUrl: string, child: ChildProcess, timeoutMs = 3
   throw new Error(`openlist-ext did not become healthy at ${baseUrl} (${lastErr})`);
 }
 
-/** Ensure the openlist-ext binary exists; build it from source if missing. */
+/**
+ * Ensure the openlist-ext binary exists; build it from source if missing.
+ *
+ * Concurrent-safe: vitest runs each test file in its own worker, so two
+ * integration files may call this simultaneously. A lockfile (next to the
+ * binary) serializes the build — the first worker builds, the rest wait for
+ * the lock, then find the binary already present and skip. This avoids
+ * double-building (each Go build downloads deps and takes minutes).
+ */
 export async function ensureBinary(): Promise<void> {
   if (existsSync(binaryPath())) return;
   const src = process.env.OPENLIST_SRC || "/home/ubuntu/Downloads/openlist";
   const { execFileSync } = await import("node:child_process");
-  console.log(`building openlist-ext from ${src}…`);
-  execFileSync("go", ["build", "-o", binaryPath(), "."], { cwd: src, stdio: "inherit" });
+  const lockPath = `${binaryPath()}.lock`;
+  const fs = await import("node:fs");
+
+  // O_EXCL atomically claims the lock: only one caller creates it. Others
+  // fall through to polling for the binary to appear.
+  let acquired = false;
+  try {
+    fs.openSync(lockPath, "wx");
+    acquired = true;
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code !== "EEXIST") throw err;
+  }
+
+  if (acquired) {
+    try {
+      console.log(`building openlist-ext from ${src}…`);
+      execFileSync("go", ["build", "-o", binaryPath(), "."], { cwd: src, stdio: "inherit" });
+    } finally {
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        // best-effort
+      }
+    }
+    return;
+  }
+
+  // Another worker is building. Wait for the binary to appear (or the lock
+  // to clear), up to a generous bound matching the integration hook timeout.
+  const deadline = Date.now() + 240_000;
+  while (Date.now() < deadline) {
+    if (existsSync(binaryPath())) return;
+    if (!fs.existsSync(lockPath)) {
+      // Lock gone but no binary: the builder failed. Try to build ourselves.
+      return ensureBinary();
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`timed out waiting for openlist-ext build at ${binaryPath()}`);
 }

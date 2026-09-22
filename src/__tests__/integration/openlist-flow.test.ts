@@ -20,7 +20,7 @@ beforeAll(async () => {
   }
   await ensureBinary();
   h = await bootOpenList();
-}, 120_000);
+}, 180_000);
 
 afterAll(async () => {
   if (h) await h.teardown();
