@@ -31,7 +31,6 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/openlist
           path: openlist
-        continue-on-error: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -66,7 +65,6 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/openlist
           path: openlist
-        continue-on-error: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -91,10 +89,15 @@ jobs:
           npx playwright install --with-deps chromium
           npm run test:e2e
 
-  # Build and publish a multi-arch (amd64, arm64, arm/v7) static-site image
-  # to GHCR. The image is nginx serving the static export; the OpenList API
-  # key is a build arg inlined into the bundle. Only publishes on push to main
-  # (PRs build but don't push).
+  # Build and publish a multi-arch (amd64, arm64) static-site image to GHCR.
+  # The image is nginx serving the static export; the OpenList API key is a
+  # build arg inlined into the bundle. Only publishes on push to main (PRs
+  # build but don't push).
+  #
+  # arm/v7 (32-bit armhf) is intentionally excluded: Next.js does not publish
+  # a SWC native binary for linux-arm-gnueabihf, so `next build` fails with a
+  # 404 downloading @next/swc-linux-arm-gnueabihf. amd64 and arm64 (both 64-bit)
+  # have SWC binaries and cover all realistic deployment targets.
   docker:
     runs-on: ubuntu-latest
     permissions:
@@ -125,7 +128,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

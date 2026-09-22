@@ -4,9 +4,9 @@
 # server, so the final image is just nginx serving the `out/` directory. The
 # OpenList API key is a build-time NEXT_PUBLIC_* arg, inlined into the bundle.
 #
-# Multi-arch (amd64, arm64, arm/v7) is driven by buildx + QEMU in CI; this
-# Dockerfile itself is arch-agnostic (no native modules — better-sqlite3 was
-# removed).
+# Multi-arch (amd64, arm64) is driven by buildx + QEMU in CI; this Dockerfile
+# itself is arch-agnostic (no native modules — better-sqlite3 was removed).
+# arm/v7 is excluded because Next.js ships no SWC binary for 32-bit armhf.
 
 # ---- build stage ----
 FROM node:20-alpine AS build
