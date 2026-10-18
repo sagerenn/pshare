@@ -3,9 +3,29 @@ import {
   detectType,
   generateId,
   formatBytes,
+  isMarkdown,
   sanitizeName,
   EXPIRY_PRESETS,
 } from "@/lib/share-utils";
+
+describe("isMarkdown", () => {
+  it("is true for markdown-family extensions", () => {
+    expect(isMarkdown("notes.md")).toBe(true);
+    expect(isMarkdown("README.MD")).toBe(true);
+    expect(isMarkdown("doc.markdown")).toBe(true);
+    expect(isMarkdown("a/b.mdown")).toBe(true);
+    expect(isMarkdown("x.MkD")).toBe(true);
+  });
+
+  it("is false for other text and non-text files", () => {
+    expect(isMarkdown("paste.txt")).toBe(false);
+    expect(isMarkdown("data.json")).toBe(false);
+    expect(isMarkdown("script.sh")).toBe(false);
+    expect(isMarkdown("photo.png")).toBe(false);
+    // Same convention as detectType: a bare "md" name counts as .md.
+    expect(isMarkdown("md")).toBe(true);
+  });
+});
 
 describe("detectType", () => {
   it("classifies text when isText is true", () => {

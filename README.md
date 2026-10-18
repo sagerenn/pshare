@@ -24,7 +24,10 @@ browser ──▶ OpenList HTTP API (scoped API key) ──▶ Local driver (dis
   applies. The share link is `/s?id=<id>&name=<name>`.
 - **View**: the browser `POST /api/fs/get`s the file info, resolves the
   returned `raw_url` (a public, no-auth signed download link), and renders the
-  right viewer (text, image, video, audio) or offers a download.
+  right viewer — text (with a Markdown preview/source toggle via
+  react-markdown + remark-gfm), inline image, inline `<video>`/`<audio>` —
+  or offers a download. Media that the browser can't decode falls back to a
+  download card instead of a broken preview.
 - **Expiry**: OpenList's TTL feature auto-deletes expired files via its
   background reaper. No pshare-side cleanup is needed.
 - **Delete**: the share page offers a Delete button that calls
@@ -179,7 +182,9 @@ src/
   app/
     page.tsx                 home: create a share (text or file) → upload to OpenList;
                              includes the OpenList connection panel (runtime URL + API key)
-    s/page.tsx               share view: fetch raw_url, render viewer, download, delete
+    s/page.tsx               share view: fetch raw_url, render viewer (markdown
+                             preview via react-markdown + remark-gfm, inline
+                             image/video/audio), download, delete
     manifest.ts              PWA manifest, generated at build time (honors NEXT_PUBLIC_BASE_PATH)
     layout.tsx               PWA metadata, theme color, service-worker registration
     sw-register.tsx          client-side SW registration

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatBytes, detectType } from "@/lib/share-utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { formatBytes, detectType, isMarkdown } from "@/lib/share-utils";
 import { OpenListClient, OpenListError, type FileInfo } from "@/lib/openlist-client";
 import { loadConfig, isConfigured, withBasePath } from "@/lib/config";
 
@@ -141,13 +143,13 @@ function Viewer({ type, rawUrl, name, textContent }: {
 }) {
   switch (type) {
     case "text":
-      return <pre className="text-view">{textContent === null ? "Loading…" : textContent}</pre>;
+      return <TextViewer name={name} textContent={textContent} />;
     case "image":
-      return <img className="media" src={rawUrl} alt={name} />;
+      return <Media kind="image" rawUrl={rawUrl} name={name} />;
     case "video":
-      return <video className="media" src={rawUrl} controls />;
+      return <Media kind="video" rawUrl={rawUrl} name={name} />;
     case "audio":
-      return <audio className="media" src={rawUrl} controls />;
+      return <Media kind="audio" rawUrl={rawUrl} name={name} />;
     default:
       return (
         <div className="file-view">
@@ -155,6 +157,107 @@ function Viewer({ type, rawUrl, name, textContent }: {
         </div>
       );
   }
+}
+
+/**
+ * Text viewer with a Markdown preview/source toggle (react-markdown +
+ * remark-gfm). Markdown-family files default to the preview; other text
+ * (source code, logs, JSON) defaults to the source view — but any text can
+ * be previewed, so a markdown paste shared from the home page (paste.txt)
+ * renders too.
+ */
+function TextViewer({ name, textContent }: { name: string; textContent: string | null }) {
+  const [preview, setPreview] = useState(isMarkdown(name));
+  if (textContent === null) return <pre className="text-view">Loading…</pre>;
+  if (!preview) {
+    return (
+      <div className="md-view-wrap">
+        <ViewToggle preview={preview} onPreview={setPreview} />
+        <pre className="text-view">{textContent}</pre>
+      </div>
+    );
+  }
+  return (
+    <div className="md-view-wrap">
+      <ViewToggle preview={preview} onPreview={setPreview} />
+      <div className="md-view">
+        {/*
+         * react-markdown renders a React tree (no dangerouslySetInnerHTML)
+         * and its default urlTransform drops javascript:/data: URLs, so
+         * untrusted share content can't inject script. remark-gfm adds
+         * tables, strikethrough, and task lists.
+         */}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: (props) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+            img: (props) => <img {...props} alt={props.alt ?? name} loading="lazy" />,
+          }}
+        >
+          {textContent}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+function ViewToggle({ preview, onPreview }: { preview: boolean; onPreview: (v: boolean) => void }) {
+  return (
+    <div className="view-toggle" role="tablist" aria-label="Text view mode">
+      <button role="tab" aria-selected={preview} disabled={preview} onClick={() => onPreview(true)}>
+        Preview
+      </button>
+      <button role="tab" aria-selected={!preview} disabled={!preview} onClick={() => onPreview(false)}>
+        Source
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Inline media preview (image / video / audio) via the browser's native
+ * elements, with a graceful fallback (message + download link) when the file
+ * can't be decoded — e.g. a codec the browser lacks, or the signed URL
+ * expired mid-view.
+ */
+function Media({ kind, rawUrl, name }: { kind: "image" | "video" | "audio"; rawUrl: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="file-view">
+        <p className="muted">
+          This {kind} can’t be previewed in the browser{kind === "video" ? " (unsupported codec?)" : ""}.
+        </p>
+        <a className="primary" href={rawUrl} download={name}>
+          Download {name}
+        </a>
+      </div>
+    );
+  }
+  if (kind === "image") {
+    return <img className="media" src={rawUrl} alt={name} onError={() => setFailed(true)} />;
+  }
+  if (kind === "video") {
+    return (
+      <video
+        className="media"
+        src={rawUrl}
+        controls
+        playsInline
+        preload="metadata"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <audio
+      className="media audio"
+      src={rawUrl}
+      controls
+      preload="metadata"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function DeleteButton({ id, name }: { id: string; name: string }) {

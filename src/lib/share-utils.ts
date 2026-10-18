@@ -33,6 +33,19 @@ const TEXT_EXTS = new Set([
 ]);
 
 /**
+ * Extensions previewed as rendered Markdown in the share viewer (react-markdown
+ * + remark-gfm). Other text shares stay in the monospace source view —
+ * rendering e.g. a .json or .sh as Markdown would look wrong.
+ */
+const MARKDOWN_EXTS = new Set(["md", "markdown", "mdown", "mkd"]);
+
+/** True when the share should be previewed as rendered Markdown. */
+export function isMarkdown(name: string): boolean {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return MARKDOWN_EXTS.has(ext);
+}
+
+/**
  * Detect the share type from a MIME type and file name. Text content sent
  * without a file is classified as "text"; a text/* MIME or a known text
  * extension also renders as inline text so that a shared `paste.txt` (or an
