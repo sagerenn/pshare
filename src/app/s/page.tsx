@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatBytes, detectType } from "@/lib/share-utils";
 import { OpenListClient, OpenListError, type FileInfo } from "@/lib/openlist-client";
-import { loadConfig, isConfigured } from "@/lib/config";
+import { loadConfig, isConfigured, withBasePath } from "@/lib/config";
 
 type State =
   | { kind: "loading" }
@@ -101,7 +101,7 @@ export default function ShareView() {
           <h2>Unavailable</h2>
           <p className="muted">{state.message}</p>
           {state.showSetup && (
-            <a className="primary setup-link" href="/">
+            <a className="primary setup-link" href={withBasePath("/")}>
               Open the home page to configure
             </a>
           )}

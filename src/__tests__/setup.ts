@@ -37,6 +37,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_PSHARE_MAX_BYTES = "104857600";
   process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL = "86400";
   process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL = "1 day";
+  process.env.NEXT_PUBLIC_BASE_PATH = "";
   resetConfig();
   storage.clear();
 });

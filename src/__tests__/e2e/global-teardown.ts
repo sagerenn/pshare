@@ -7,12 +7,16 @@ export default async function globalTeardown() {
     __e2eOl?: Harness;
     __e2eSite?: StaticSite;
     __e2eUnconfigured?: StaticSite;
+    __e2eBasepath?: StaticSite;
   };
   try {
     if (g.__e2eSite) await g.__e2eSite.teardown();
   } catch {}
   try {
     if (g.__e2eUnconfigured) await g.__e2eUnconfigured.teardown();
+  } catch {}
+  try {
+    if (g.__e2eBasepath) await g.__e2eBasepath.teardown();
   } catch {}
   try {
     if (g.__e2eOl) await g.__e2eOl.teardown();

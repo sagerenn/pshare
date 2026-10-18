@@ -3,9 +3,15 @@
  * shell and static assets for offline use. Share *content* (text, files,
  * media) is fetched live from OpenList and is never cached — shares are
  * temporary and must reflect their current (possibly expired) state.
+ *
+ * All paths are derived from this script's own URL, so the same SW works at
+ * the root and under a sub-path (e.g. GitHub Pages /pshare/) without a
+ * rebuild: serving /pshare/sw.js means the app shell lives at /pshare/.
  */
 const CACHE = "pshare-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+// "/pshare/sw.js" -> "/pshare/"; "/sw.js" -> "/"
+const BASE = self.location.pathname.replace(/sw\.js$/, "");
+const APP_SHELL = [BASE, `${BASE}manifest.webmanifest`, `${BASE}icon-192.png`, `${BASE}icon-512.png`];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -41,7 +47,7 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE).then((c) => c.put(req, copy));
           return resp;
         })
-        .catch(() => caches.match(req).then((r) => r || caches.match("/"))),
+        .catch(() => caches.match(req).then((r) => r || caches.match(BASE))),
     );
     return;
   }

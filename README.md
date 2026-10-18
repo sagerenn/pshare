@@ -109,6 +109,7 @@ is no runtime server to read env from):
 | `NEXT_PUBLIC_PSHARE_MAX_BYTES` | `104857600` (100 MiB) | Max upload size (client-side check) |
 | `NEXT_PUBLIC_PSHARE_DEFAULT_TTL` | `86400` (1 day) | Default TTL label/value |
 | `NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL` | `1 day` | Human label for the default TTL |
+| `NEXT_PUBLIC_BASE_PATH` | — (root) | Sub-path the whole site is served under, no trailing slash (e.g. `/pshare`) |
 
 The two connection vars are optional: build with them empty to ship an
 unconfigured bundle that visitors point at their own OpenList via the
@@ -134,6 +135,15 @@ pshare is a static export (`out/`), so it runs anywhere:
   Build args are optional: with the base URL / API key left out, the image
   ships unconfigured and each visitor enters their OpenList URL + key on the
   page (saved in their browser).
+
+- **GitHub Pages** — the `pages` workflow publishes the static export to
+  `https://<owner>.github.io/pshare/` on every push to `main`. GitHub Pages
+  serves a project repo under a sub-path, so the workflow builds with
+  `NEXT_PUBLIC_BASE_PATH=/<repo>` (share links, service-worker paths, and
+  manifest URLs follow automatically). Enable Pages once with
+  **Settings → Pages → Source: GitHub Actions**; the `OPENLIST_*` secrets and
+  `OPENLIST_*` variables are optional — without them the published site is
+  unconfigured and visitors connect from the page.
 
 - **PWA** — a web manifest, service worker, and icons are included, so the
   site is installable and works offline (the app shell caches; share content
@@ -170,11 +180,13 @@ src/
     page.tsx                 home: create a share (text or file) → upload to OpenList;
                              includes the OpenList connection panel (runtime URL + API key)
     s/page.tsx               share view: fetch raw_url, render viewer, download, delete
-    layout.tsx               PWA manifest, theme color, service-worker registration
+    manifest.ts              PWA manifest, generated at build time (honors NEXT_PUBLIC_BASE_PATH)
+    layout.tsx               PWA metadata, theme color, service-worker registration
     sw-register.tsx          client-side SW registration
   lib/
     config.ts                layered config: build-time NEXT_PUBLIC_* + runtime
-                             connection saved in localStorage (overrides build-time)
+                             connection saved in localStorage (overrides build-time);
+                             base-path helpers for share links / SW paths
     openlist-client.ts       browser OpenList client (API key, upload, get, remove)
     share-utils.ts           type detection, id, sanitize, expiry presets
   __tests__/
@@ -183,10 +195,10 @@ src/
     e2e/                     Playwright browser tests (real binary + static export)
     harness/                 shared boot harnesses (openlist-bin, next-app static server)
 public/
-  manifest.webmanifest       PWA manifest
-  sw.js                      service worker (app-shell cache)
+  sw.js                      service worker (app-shell cache, base-path aware)
   icon-*.png                 PWA icons
 scripts/provision-key.js     mint a scoped OpenList API key for the build
+scripts/apply-base-path.js  post-build: prefix the manifest link with NEXT_PUBLIC_BASE_PATH
 Dockerfile                   multi-arch nginx static-site image
 nginx.conf                   SPA + .html fallback config
 ```

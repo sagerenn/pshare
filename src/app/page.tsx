@@ -9,6 +9,8 @@ import {
   saveRuntimeConnection,
   clearRuntimeConnection,
   hasRuntimeConnection,
+  siteUrl,
+  withBasePath,
   type Config,
 } from "@/lib/config";
 
@@ -91,6 +93,8 @@ export default function Home() {
 
       setResult({
         id,
+        // Site-relative path; ShareResult prefixes the base path at render
+        // time (siteUrl / withBasePath), so don't bake it in here too.
         url: `/s?id=${id}&name=${encodeURIComponent(name)}`,
         type,
         name,
@@ -372,7 +376,7 @@ function ConnectionSettings({
 
 function ShareResult({ result }: { result: CreateResp }) {
   const [copied, setCopied] = useState(false);
-  const url = `${window.location.origin}${result.url}`;
+  const url = siteUrl(result.url);
   const copy = () => {
     navigator.clipboard.writeText(url);
     setCopied(true);
@@ -383,7 +387,7 @@ function ShareResult({ result }: { result: CreateResp }) {
       <div className="result-url">
         <input readOnly value={url} onFocus={(e) => e.target.select()} />
         <button onClick={copy}>{copied ? "Copied!" : "Copy"}</button>
-        <a className="open" href={result.url} target="_blank" rel="noreferrer">
+        <a className="open" href={withBasePath(result.url)} target="_blank" rel="noreferrer">
           Open
         </a>
       </div>

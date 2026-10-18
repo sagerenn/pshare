@@ -1,0 +1,93 @@
+# Publish the pshare static export to GitHub Pages.
+#
+# GitHub Pages serves a repo's project site at https://<owner>.github.io/<repo>/,
+# so the bundle is built with NEXT_PUBLIC_BASE_PATH="/<repo>" — Next prefixes
+# /_next assets, and src/lib + public/sw.js + app/manifest.ts keep share links,
+# service-worker paths, and manifest URLs under the same prefix.
+#
+# Deployment uses the official Pages actions (upload-pages-artifact +
+# deploy-pages) with the repo's built-in GITHUB_TOKEN — no PAT, no SSH keys,
+# no gh-branch juggling. Pages must be enabled with Source "GitHub Actions"
+# (Settings → Pages), which the first run of this workflow requires.
+#
+# The OpenList connection is optional: with the OPENLIST_* secrets unset the
+# site ships unconfigured and visitors enter their URL + key on the page (the
+# same trade-off the Docker image makes). Set the secrets to bake the
+# connection in for every visitor.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+# PRs only validate the build (the deploy job is skipped); pushes to main
+# deploy to the live Pages site.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a new push to main supersedes the in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+
+      # A <owner>.github.io repo serves at the root; anything else serves at
+      # /<repo-name>/, which must be baked in as the base path.
+      - name: Compute Pages base path
+        id: basepath
+        run: |
+          if [ "${{ github.event.repository.name }}" = "${{ github.event.repository_owner }}.github.io" ]; then
+            echo "path=" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=/${{ github.event.repository.name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build static export
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.basepath.outputs.path }}
+          NEXT_PUBLIC_OPENLIST_BASE_URL: ${{ secrets.OPENLIST_BASE_URL }}
+          NEXT_PUBLIC_OPENLIST_API_KEY: ${{ secrets.OPENLIST_API_KEY }}
+          NEXT_PUBLIC_OPENLIST_MOUNT_PATH: ${{ vars.OPENLIST_MOUNT_PATH || '/pshare' }}
+          NEXT_PUBLIC_PSHARE_DEFAULT_TTL: ${{ vars.OPENLIST_DEFAULT_TTL || '86400' }}
+          NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL: ${{ vars.OPENLIST_DEFAULT_TTL_LABEL || '1 day' }}
+        run: npm run build
+
+      # Pages runs Jekyll by default, which would drop the _next/ directory
+      # (underscore-prefixed). .nojekyll opts out; harmless with the Actions
+      # deployment path, required if the artifact is ever republished the
+      # classic branch way.
+      - name: Disable Jekyll processing
+        run: touch out/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    # Never deploy from PRs (fork PRs don't even get pages:write).
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

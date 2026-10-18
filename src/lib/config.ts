@@ -31,6 +31,8 @@ export type Config = {
   defaultTtl: number;
   /** Human label for the default TTL, shown in the UI. */
   defaultTtlLabel: string;
+  /** Base path the site is served under ("" or e.g. "/pshare"). */
+  basePath: string;
 };
 
 /** The runtime-configurable part of the connection, saved in localStorage. */
@@ -73,6 +75,8 @@ export function loadBuildConfig(): Config {
     maxBytes: num(process.env.NEXT_PUBLIC_PSHARE_MAX_BYTES, 104857600),
     defaultTtl: num(process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL, 86400),
     defaultTtlLabel: str(process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL, "1 day"),
+    // Same value as next.config.js's basePath, inlined at build time.
+    basePath: str(process.env.NEXT_PUBLIC_BASE_PATH, "").replace(/\/+$/, ""),
   };
 }
 
@@ -161,4 +165,23 @@ export function resetConfig(): void {
 export function isConfigured(): boolean {
   const cfg = loadConfig();
   return cfg.openlistBaseUrl !== "" && cfg.openlistApiKey !== "";
+}
+
+/**
+ * Prefix a site-relative path with the base path the bundle was built for.
+ * withBasePath("/s?id=x") is "/s?id=x" at the root and "/pshare/s?id=x" under
+ * a sub-path deployment (e.g. GitHub Pages). Path must start with "/".
+ */
+export function withBasePath(path: string): string {
+  const base = loadConfig().basePath;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+/**
+ * Build a shareable absolute URL for a site-relative path, e.g. the share link
+ * shown on the home page. Uses the current page's origin, so it is correct on
+ * any host the static bundle ends up on.
+ */
+export function siteUrl(path: string): string {
+  return `${window.location.origin}${withBasePath(path)}`;
 }

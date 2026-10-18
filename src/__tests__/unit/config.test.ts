@@ -8,6 +8,7 @@ import {
   readRuntimeConnection,
   resetConfig,
   isConfigured,
+  withBasePath,
 } from "@/lib/config";
 
 /**
@@ -59,6 +60,29 @@ describe("build-time config", () => {
     process.env.NEXT_PUBLIC_OPENLIST_BASE_URL = "http://ol.test";
     process.env.NEXT_PUBLIC_OPENLIST_API_KEY = "test-secret-key";
     resetConfig();
+  });
+});
+
+describe("base path (sub-path deployments)", () => {
+  it("is empty and prefixes nothing by default", () => {
+    expect(loadConfig().basePath).toBe("");
+    expect(withBasePath("/s?id=abc&name=x.txt")).toBe("/s?id=abc&name=x.txt");
+    expect(withBasePath("sw.js")).toBe("/sw.js");
+  });
+
+  it("prefixes site-relative paths when built with NEXT_PUBLIC_BASE_PATH", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/pshare";
+    resetConfig();
+    expect(loadConfig().basePath).toBe("/pshare");
+    expect(withBasePath("/s?id=abc&name=x.txt")).toBe("/pshare/s?id=abc&name=x.txt");
+    expect(withBasePath("/")).toBe("/pshare/");
+    expect(withBasePath("sw.js")).toBe("/pshare/sw.js");
+  });
+
+  it("strips a trailing slash from the env value (one canonical form)", () => {
+    process.env.NEXT_PUBLIC_BASE_PATH = "/pshare/";
+    resetConfig();
+    expect(loadConfig().basePath).toBe("/pshare");
   });
 });
 

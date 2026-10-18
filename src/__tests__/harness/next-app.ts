@@ -6,11 +6,13 @@
  * server — the built `out/` directory is served as static files. This harness
  * reproduces that exactly, so e2e tests run against the real static bundle.
  *
- * Two variants exist: startStaticSite bakes the connection into the bundle,
- * and startUnconfiguredStaticSite builds with no build-time connection so
- * e2e tests can exercise configuring OpenList from the page at runtime. The
- * unconfigured build is served from a copy of `out/` (the configured build
- * would otherwise overwrite it on disk).
+ * Two variants exist: startStaticSite bakes the connection into the bundle
+ * (optionally under a NEXT_PUBLIC_BASE_PATH sub-path, served under that
+ * prefix like GitHub Pages), and startUnconfiguredStaticSite builds with no
+ * build-time connection so e2e tests can exercise configuring OpenList from
+ * the page at runtime. Each build overwrites `out/` in place, so every
+ * variant serves its own snapshot copy (out-configured/, out-unconfigured/,
+ * out-basepath/) — the servers read files from disk on every request.
  */
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -39,12 +41,17 @@ const MIME: Record<string, string> = {
 /**
  * Build the static export with the given config baked in, then serve `out/`.
  * Resolves when the server is listening.
+ *
+ * `basePath` builds the bundle for a sub-path deployment (e.g. "/pshare",
+ * like GitHub Pages) and serves it under that prefix, exercising the same
+ * URL handling a real sub-path host would.
  */
 export async function startStaticSite(opts: {
   openlistBaseUrl: string;
   apiKey: string;
   mountPath?: string;
   port?: number;
+  basePath?: string;
 }): Promise<StaticSite> {
   const root = path.resolve(__dirname, "../../..");
   const env = {
@@ -54,9 +61,16 @@ export async function startStaticSite(opts: {
     NEXT_PUBLIC_OPENLIST_MOUNT_PATH: opts.mountPath ?? "/pshare",
     NEXT_PUBLIC_PSHARE_DEFAULT_TTL: "86400",
     NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL: "1 day",
+    NEXT_PUBLIC_BASE_PATH: opts.basePath ?? "",
   };
   await buildStatic(root, env);
-  return serveOutDir(path.join(root, "out"), opts.port);
+  // Always serve from a snapshot copy of out/: a later build (global setup
+  // builds several bundles) overwrites out/ in place, and this server reads
+  // files from disk on every request.
+  const serveDir = path.join(root, opts.basePath ? "out-basepath" : "out-configured");
+  await rm(serveDir, { recursive: true, force: true });
+  await cp(path.join(root, "out"), serveDir, { recursive: true });
+  return serveOutDir(serveDir, opts.port, opts.basePath);
 }
 
 /**
@@ -91,21 +105,46 @@ function buildStatic(root: string, env: NodeJS.ProcessEnv): Promise<void> {
   });
 }
 
-async function serveOutDir(outDir: string, port?: number): Promise<StaticSite> {
+async function serveOutDir(outDir: string, port?: number, basePath?: string): Promise<StaticSite> {
   const actualPort = port ?? (await freePort());
-  const server = createServer((req, res) => serveStatic(outDir, req, res));
+  const prefix = basePath ? `${basePath.replace(/\/+$/, "")}/` : "";
+  const server = createServer((req, res) => serveStatic(outDir, req, res, prefix));
   await new Promise<void>((r) => server.listen(actualPort, r));
   return {
-    baseUrl: `http://127.0.0.1:${actualPort}`,
+    // The page-reachable root includes the base path, like the deployed URL.
+    baseUrl: `http://127.0.0.1:${actualPort}${prefix ? prefix.slice(0, -1) : ""}`,
     teardown: async () => {
       await new Promise<void>((r) => server.close(() => r()));
     },
   };
 }
 
-/** Minimal static file server with .html and SPA fallback to index.html. */
-async function serveStatic(root: string, req: IncomingMessage, res: ServerResponse) {
-  const urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
+/**
+ * Minimal static file server with .html and SPA fallback to index.html.
+ * `prefix` serves the tree under a base path (e.g. /pshare/foo -> out/foo),
+ * mirroring how a sub-path host (GitHub Pages) maps URLs to the artifact.
+ */
+async function serveStatic(root: string, req: IncomingMessage, res: ServerResponse, prefix = "") {
+  let urlPath = decodeURIComponent((req.url || "/").split("?")[0]);
+  if (prefix) {
+    if (urlPath === prefix.slice(0, -1)) {
+      // A sub-path host (GitHub Pages / nginx) 301s /pshare to /pshare/; the
+      // redirect matters for the service-worker scope, which the trailing-
+      // slash-less page would fall outside of.
+      res.statusCode = 301;
+      res.setHeader("Location", prefix);
+      res.end();
+      return;
+    }
+    if (urlPath.startsWith(prefix)) urlPath = urlPath.slice(prefix.length - 1);
+    else {
+      // A path outside the base path (an unprefixed asset) is a real 404 —
+      // no SPA fallback, so specs can catch prefix bugs.
+      res.statusCode = 404;
+      res.end("outside base path");
+      return;
+    }
+  }
   // Try the exact path, then <path>.html (Next export emits s.html for /s),
   // then <path>/index.html, then SPA fallback to index.html.
   const candidates = [
