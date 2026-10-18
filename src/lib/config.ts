@@ -1,8 +1,17 @@
 /**
- * Browser-side configuration, read from NEXT_PUBLIC_* env vars which Next.js
- * inlines into the static bundle at build time. Because pshare is a static
- * site with no server, every value must be known at build time — there is no
- * runtime process to read env from.
+ * Browser-side configuration, layered from two sources:
+ *
+ * 1. Build-time: NEXT_PUBLIC_* env vars which Next.js inlines into the
+ *    static bundle at build time. Because pshare is a static site with no
+ *    server, every value must be known at build time — there is no runtime
+ *    process to read env from.
+ * 2. Runtime: an OpenList base URL + API key entered on the page (the
+ *    connection settings on the home page) and persisted in the browser's
+ *    localStorage. These override the build-time values, so a bundle built
+ *    without secrets — e.g. the prebuilt image — can be pointed at any
+ *    OpenList instance from the webpage, without a rebuild. The saved
+ *    settings are per-browser; for an instance used by many visitors, bake
+ *    the values in at build time instead.
  *
  * The OpenList API key is a non-admin user's key with scopes fs.put / fs.get
  * / fs.rm and CanList=false. It is intentionally embedded in the bundle: it
@@ -24,6 +33,17 @@ export type Config = {
   defaultTtlLabel: string;
 };
 
+/** The runtime-configurable part of the connection, saved in localStorage. */
+export type RuntimeConnection = {
+  /** Base URL of the OpenList backend, e.g. https://ol.example.com */
+  openlistBaseUrl: string;
+  /** A non-admin user's API key (scopes fs.put/fs.get/fs.rm, no list). */
+  openlistApiKey: string;
+};
+
+/** localStorage key holding the saved runtime connection. */
+const STORAGE_KEY = "pshare.connection";
+
 // NEXT_PUBLIC_* vars are inlined by Next.js at build time, but ONLY when
 // referenced as literal `process.env.NEXT_PUBLIC_X` member access — a dynamic
 // `process.env[key]` lookup is NOT replaced and resolves to undefined in the
@@ -40,12 +60,13 @@ function num(raw: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-let cached: Config | null = null;
-
-/** Load (and cache) the config from the build-time env. */
-export function loadConfig(): Config {
-  if (cached) return cached;
-  cached = {
+/**
+ * The build-time config from the inlined NEXT_PUBLIC_* env vars only — no
+ * localStorage access, so it is safe during prerender and during the first
+ * client render (which must match the prerendered HTML to hydrate cleanly).
+ */
+export function loadBuildConfig(): Config {
+  return {
     openlistBaseUrl: str(process.env.NEXT_PUBLIC_OPENLIST_BASE_URL, "").replace(/\/+$/, ""),
     openlistApiKey: str(process.env.NEXT_PUBLIC_OPENLIST_API_KEY, ""),
     openlistMountPath: str(process.env.NEXT_PUBLIC_OPENLIST_MOUNT_PATH, "/pshare"),
@@ -53,6 +74,81 @@ export function loadConfig(): Config {
     defaultTtl: num(process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL, 86400),
     defaultTtlLabel: str(process.env.NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL, "1 day"),
   };
+}
+
+/**
+ * Read the connection saved in this browser at runtime, if any. Returns null
+ * when storage is unavailable (prerender / SSR / private mode), the value is
+ * corrupt, or either field is empty — an incomplete override is ignored so
+ * the build-time values keep working.
+ */
+export function readRuntimeConnection(): RuntimeConnection | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<RuntimeConnection>;
+    const baseUrl =
+      typeof parsed.openlistBaseUrl === "string" ? parsed.openlistBaseUrl.trim().replace(/\/+$/, "") : "";
+    const key = typeof parsed.openlistApiKey === "string" ? parsed.openlistApiKey.trim() : "";
+    if (!baseUrl || !key) return null;
+    return { openlistBaseUrl: baseUrl, openlistApiKey: key };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save the OpenList connection for this browser, overriding the build-time
+ * values. Takes effect immediately (the config cache is reset). Empty values
+ * are treated as "no override" and remove any saved connection. Returns
+ * false when localStorage is unavailable, so the UI can warn that the
+ * settings will not persist.
+ */
+export function saveRuntimeConnection(baseUrl: string, apiKey: string): boolean {
+  const clean: RuntimeConnection = {
+    openlistBaseUrl: baseUrl.trim().replace(/\/+$/, ""),
+    openlistApiKey: apiKey.trim(),
+  };
+  try {
+    if (!clean.openlistBaseUrl || !clean.openlistApiKey) {
+      localStorage.removeItem(STORAGE_KEY);
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
+    }
+  } catch {
+    return false;
+  }
+  resetConfig();
+  return true;
+}
+
+/** Forget the connection saved in this browser, falling back to build-time config. */
+export function clearRuntimeConnection(): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage unavailable — nothing to clear; the build-time config applies.
+  }
+  resetConfig();
+}
+
+/** True when a connection has been saved in this browser at runtime. */
+export function hasRuntimeConnection(): boolean {
+  return readRuntimeConnection() !== null;
+}
+
+let cached: Config | null = null;
+
+/**
+ * Load (and cache) the effective config: the build-time values overridden by
+ * any connection saved in this browser at runtime.
+ */
+export function loadConfig(): Config {
+  if (cached) return cached;
+  const build = loadBuildConfig();
+  const runtime = readRuntimeConnection();
+  cached = runtime ? { ...build, ...runtime } : build;
   return cached;
 }
 

@@ -61,6 +61,35 @@ describe("OpenListClient.get/remove", () => {
     expect(body).toEqual({ path: "/pshare/a" });
   });
 
+  it("gets the mount path (the connection-settings probe)", async () => {
+    // The runtime settings UI validates a URL + key by calling get() on the
+    // mount path: reachability, key validity, the fs.get scope, and the
+    // mount's existence all get checked in one round-trip.
+    const fetchImpl = mockFetch({
+      "/api/fs/get": () => ({ name: "pshare", size: 0, is_dir: true, modified: "x", raw_url: "" }),
+    });
+    const c = new OpenListClient(cfg, fetchImpl as unknown as typeof fetch);
+    await expect(c.get("/pshare")).resolves.toMatchObject({ is_dir: true });
+    const call = fetchImpl.mock.calls[0];
+    expect(call[0]).toBe("http://ol.test/api/fs/get");
+    const headers = (call[1] as RequestInit).headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe(`Bearer ${cfg.openlistApiKey}`);
+  });
+
+  it("throws OpenListError(401) when the API key is rejected", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ code: 401, message: "token is invalidated", data: null }),
+    } as Response));
+    const c = new OpenListClient(cfg, fetchImpl as unknown as typeof fetch);
+    await expect(c.get("/pshare")).rejects.toMatchObject({
+      name: "OpenListError",
+      code: 401,
+      message: "token is invalidated",
+    });
+  });
+
   it("removes a file by dir + names", async () => {
     const fetchImpl = mockFetch({
       "/api/fs/remove": () => null,

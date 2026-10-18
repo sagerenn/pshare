@@ -8,7 +8,7 @@ import { loadConfig, isConfigured } from "@/lib/config";
 type State =
   | { kind: "loading" }
   | { kind: "ok"; id: string; info: FileInfo; name: string; type: ReturnType<typeof detectType>; rawUrl: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; showSetup?: boolean };
 
 /**
  * Static share-view page. pshare is a static export, so the share id and file
@@ -28,7 +28,12 @@ export default function ShareView() {
     const name = params.get("name") ?? "";
 
     if (!isConfigured()) {
-      setState({ kind: "error", message: "pshare is not configured." });
+      setState({
+        kind: "error",
+        message:
+          "pshare is not configured — open the home page to set up the OpenList connection.",
+        showSetup: true,
+      });
       return;
     }
     if (!id || !name) {
@@ -95,6 +100,11 @@ export default function ShareView() {
         <div className="card">
           <h2>Unavailable</h2>
           <p className="muted">{state.message}</p>
+          {state.showSetup && (
+            <a className="primary setup-link" href="/">
+              Open the home page to configure
+            </a>
+          )}
         </div>
       </main>
     );

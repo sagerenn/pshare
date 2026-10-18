@@ -191,6 +191,116 @@ body {
   font-size: 0.9rem;
 }
 
+/* ---- runtime connection settings (OpenList URL + API key) ---- */
+
+.connection {
+  margin-bottom: 1rem;
+}
+
+.connection-toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 0 0.2rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-toggle:hover {
+  color: var(--text);
+}
+
+.connection-panel {
+  margin-top: 0.5rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.connection-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.9rem;
+}
+
+.connection-panel input {
+  background: var(--card-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.connection-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.connection-actions .primary {
+  width: auto;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.9rem;
+}
+
+.connection-actions button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  background: var(--card-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.connection-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.connection-actions .danger {
+  background: none;
+  border: none;
+  color: var(--danger);
+}
+
+.connection-note {
+  font-size: 0.78rem;
+  margin: 0.75rem 0 0;
+}
+
+.notice-ok {
+  margin-top: 0.75rem;
+  color: #2e9e5b;
+  font-size: 0.9rem;
+}
+
+@media (prefers-color-scheme: light) {
+  .notice-ok {
+    color: #1d7a41;
+  }
+}
+
+.setup-link {
+  display: inline-block;
+  width: auto;
+  margin-top: 1rem;
+  padding: 0.6rem 1.5rem;
+}
+
 .result {
   margin-top: 1.25rem;
   padding-top: 1.25rem;

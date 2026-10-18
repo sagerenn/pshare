@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { EXPIRY_PRESETS, formatBytes, detectType, generateId, sanitizeName } from "@/lib/share-utils";
 import { OpenListClient, OpenListError } from "@/lib/openlist-client";
-import { loadConfig, isConfigured } from "@/lib/config";
+import {
+  loadBuildConfig,
+  loadConfig,
+  saveRuntimeConnection,
+  clearRuntimeConnection,
+  hasRuntimeConnection,
+  type Config,
+} from "@/lib/config";
 
 type CreateResp = {
   id: string;
@@ -17,8 +24,12 @@ type CreateResp = {
 type Tab = "text" | "file";
 
 export default function Home() {
-  const cfg = loadConfig();
-  const configured = isConfigured();
+  // Seed with the build-time config so the first client render matches the
+  // prerendered HTML exactly; any connection saved in this browser is merged
+  // in after mount (reading localStorage during the hydration render would
+  // desync from the prerendered output).
+  const [cfg, setCfg] = useState<Config>(loadBuildConfig);
+  const configured = cfg.openlistBaseUrl !== "" && cfg.openlistApiKey !== "";
   const [tab, setTab] = useState<Tab>("text");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -26,6 +37,10 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CreateResp | null>(null);
+
+  useEffect(() => {
+    setCfg(loadConfig());
+  }, []);
 
   const submit = useCallback(async () => {
     setBusy(true);
@@ -85,6 +100,14 @@ export default function Home() {
     } catch (e) {
       if (e instanceof OpenListError) {
         setError(`upload failed: ${e.message} (code ${e.code})`);
+      } else if (e instanceof TypeError) {
+        // A fetch TypeError is a network or CORS failure. A rejected API key
+        // can also land here: OpenList's auth middleware aborts before its
+        // CORS middleware runs, so the browser hides the 401 response and
+        // fetch rejects with a generic "Failed to fetch".
+        setError(
+          "upload failed: could not reach OpenList — check the URL, that the backend is running, and that the API key is valid",
+        );
       } else {
         setError((e as Error).message);
       }
@@ -102,10 +125,13 @@ export default function Home() {
 
       {!configured && (
         <div className="error">
-          pshare is not configured. Set NEXT_PUBLIC_OPENLIST_BASE_URL and
-          NEXT_PUBLIC_OPENLIST_API_KEY at build time.
+          pshare is not configured. Enter the OpenList URL and API key below — they are
+          saved in this browser — or bake them in at build time with the
+          NEXT_PUBLIC_* environment variables.
         </div>
       )}
+
+      <ConnectionSettings cfg={cfg} onConfigChange={() => setCfg(loadConfig())} />
 
       <section className="card">
         <div className="tabs">
@@ -174,11 +200,173 @@ export default function Home() {
       <footer className="footer">
         <p>
           Files are stored via OpenList and auto-deleted when they expire. The
-          API key in the bundle is scope-limited (upload / read / delete only,
-          no listing).
+          API key is scope-limited (upload / read / delete only, no listing),
+          whether baked in at build time or saved here at runtime.
         </p>
       </footer>
     </main>
+  );
+}
+
+/**
+ * Runtime connection settings: point this browser at an OpenList backend
+ * without a rebuild. Saved to localStorage and layered over the build-time
+ * config (see src/lib/config.ts). Also offers a live "test connection"
+ * probe (fs/get on the mount path) so mis-typed URLs / keys are caught
+ * before saving.
+ */
+function ConnectionSettings({
+  cfg,
+  onConfigChange,
+}: {
+  cfg: Config;
+  onConfigChange: () => void;
+}) {
+  const [open, setOpen] = useState(cfg.openlistBaseUrl === "" || cfg.openlistApiKey === "");
+  const [baseUrl, setBaseUrl] = useState(cfg.openlistBaseUrl);
+  const [apiKey, setApiKey] = useState(cfg.openlistApiKey);
+  const [savedInBrowser, setSavedInBrowser] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Whether an override is stored is only knowable after mount — the
+  // prerendered HTML cannot see localStorage.
+  useEffect(() => {
+    setSavedInBrowser(hasRuntimeConnection());
+  }, []);
+
+  // The parent merges any saved runtime connection into cfg after mount;
+  // follow it so the fields show the connection actually in effect (the one
+  // just saved, or the saved one on a later visit), not the build-time one.
+  // cfg only changes after save / clear, which reset these fields anyway.
+  useEffect(() => {
+    setBaseUrl(cfg.openlistBaseUrl);
+    setApiKey(cfg.openlistApiKey);
+  }, [cfg.openlistBaseUrl, cfg.openlistApiKey]);
+
+  const trimmed = () => ({
+    base: baseUrl.trim().replace(/\/+$/, ""),
+    key: apiKey.trim(),
+  });
+
+  const save = () => {
+    const { base, key } = trimmed();
+    if (!base || !key) {
+      setMessage({ ok: false, text: "Enter both the OpenList URL and the API key." });
+      return;
+    }
+    const persisted = saveRuntimeConnection(base, key);
+    setSavedInBrowser(persisted && hasRuntimeConnection());
+    onConfigChange();
+    setMessage(
+      persisted
+        ? { ok: true, text: "Saved — this browser will use this connection." }
+        : {
+            ok: false,
+            text: "Applied for this visit, but saving failed (browser storage unavailable).",
+          },
+    );
+  };
+
+  const test = async () => {
+    const { base, key } = trimmed();
+    if (!base || !key) {
+      setMessage({ ok: false, text: "Enter both the OpenList URL and the API key." });
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      // Probe with the same call the share view uses: fs/get on the mount
+      // path. It checks everything pshare needs in one round-trip — the
+      // URL is reachable, the key is accepted (401 otherwise), the key has
+      // the fs.get scope, and the mount exists.
+      await new OpenListClient({ openlistBaseUrl: base, openlistApiKey: key }).get(
+        cfg.openlistMountPath,
+      );
+      setMessage({ ok: true, text: `Connected — ${base} accepted the API key.` });
+    } catch (e) {
+      let text: string;
+      if (e instanceof OpenListError) {
+        if (e.code === 401) {
+          text = `Failed: the API key was rejected by ${base}.`;
+        } else if (/object not found|no such/i.test(e.message)) {
+          text = `The key works, but ${cfg.openlistMountPath} was not found on ${base} — shares cannot be stored there.`;
+        } else {
+          text = `Failed: ${e.message} (code ${e.code}).`;
+        }
+      } else {
+        // A fetch TypeError covers unreachable URLs, down backends, and —
+        // because OpenList's auth middleware aborts before its CORS
+        // middleware runs — rejected keys, whose 401 the browser hides as
+        // a generic network error.
+        text = `Failed: could not reach ${base} — the URL may be wrong, OpenList may be down, or the API key may have been rejected.`;
+      }
+      setMessage({ ok: false, text });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = () => {
+    clearRuntimeConnection();
+    setSavedInBrowser(false);
+    const build = loadBuildConfig();
+    setBaseUrl(build.openlistBaseUrl);
+    setApiKey(build.openlistApiKey);
+    onConfigChange();
+    setMessage({ ok: true, text: "Cleared — using the build-time configuration." });
+  };
+
+  return (
+    <div className="connection">
+      <button className="connection-toggle" onClick={() => setOpen(!open)}>
+        OpenList connection · {cfg.openlistBaseUrl || "not set"}
+      </button>
+      {open && (
+        <div className="connection-panel">
+          <label>
+            OpenList URL
+            <input
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder="https://ol.example.com"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            API key
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="scoped key (fs.put / fs.get / fs.rm)"
+              autoComplete="off"
+            />
+          </label>
+          <div className="connection-actions">
+            <button className="primary" onClick={save}>
+              Save
+            </button>
+            <button onClick={test} disabled={busy}>
+              {busy ? "Testing…" : "Test connection"}
+            </button>
+            {savedInBrowser && (
+              <button className="danger" onClick={clear}>
+                Clear saved settings
+              </button>
+            )}
+          </div>
+          {message && <div className={message.ok ? "notice-ok" : "error"}>{message.text}</div>}
+          <p className="muted connection-note">
+            Saved settings live in this browser only (localStorage). For an instance used
+            by many people, bake the URL and key in at build time instead. The API key
+            needs the fs.put / fs.get / fs.rm scopes and listing disabled.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

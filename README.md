@@ -35,6 +35,26 @@ The API key embedded in the bundle is **low-privilege**: scopes `fs.put`,
 create, read, and delete files under the mount path — exactly what a no-login
 temporary sharing site needs.
 
+## Configuring the connection
+
+There are two ways to tell pshare where OpenList lives:
+
+1. **At build time (recommended for public instances)** — bake the
+   `NEXT_PUBLIC_*` vars below into the bundle. Every visitor gets a working
+   site with no setup.
+2. **At runtime, on the page** — any bundle (e.g. the prebuilt image built
+   without secrets) can be pointed at an OpenList backend from the
+   **OpenList connection** panel on the home page: enter the base URL and a
+   scoped API key, optionally **Test connection** (a live `fs/get` probe on
+   the mount path that reports unreachable URLs / rejected keys / missing
+   mounts), and **Save**.
+   The settings are stored in the browser's `localStorage` and take effect
+   immediately — no rebuild, no reload. Saving is per-browser: each visitor
+   who needs to *create* shares configures their own browser. **Clear saved
+   settings** reverts to the build-time values.
+
+Runtime values override the build-time ones when both exist.
+
 ## Quick start
 
 ### 1. Run the OpenList backend
@@ -78,17 +98,21 @@ Open http://localhost:3000.
 
 ### Build-time configuration
 
-All config is inlined into the static bundle at build time (there is no
-runtime server to read env from):
+All build-time config is inlined into the static bundle at build time (there
+is no runtime server to read env from):
 
 | Var | Default | Meaning |
 |---|---|---|
-| `NEXT_PUBLIC_OPENLIST_BASE_URL` | — (required) | OpenList backend URL |
-| `NEXT_PUBLIC_OPENLIST_API_KEY` | — (required) | Scoped non-admin API key |
+| `NEXT_PUBLIC_OPENLIST_BASE_URL` | — (see below) | OpenList backend URL |
+| `NEXT_PUBLIC_OPENLIST_API_KEY` | — (see below) | Scoped non-admin API key |
 | `NEXT_PUBLIC_OPENLIST_MOUNT_PATH` | `/pshare` | Where shares are stored in OpenList |
 | `NEXT_PUBLIC_PSHARE_MAX_BYTES` | `104857600` (100 MiB) | Max upload size (client-side check) |
 | `NEXT_PUBLIC_PSHARE_DEFAULT_TTL` | `86400` (1 day) | Default TTL label/value |
 | `NEXT_PUBLIC_PSHARE_DEFAULT_TTL_LABEL` | `1 day` | Human label for the default TTL |
+
+The two connection vars are optional: build with them empty to ship an
+unconfigured bundle that visitors point at their own OpenList via the
+connection panel on the page (see *Configuring the connection* above).
 
 ## Deploy
 
@@ -106,6 +130,10 @@ pshare is a static export (`out/`), so it runs anywhere:
     -t pshare .
   docker run -p 8080:80 pshare
   ```
+
+  Build args are optional: with the base URL / API key left out, the image
+  ships unconfigured and each visitor enters their OpenList URL + key on the
+  page (saved in their browser).
 
 - **PWA** — a web manifest, service worker, and icons are included, so the
   site is installable and works offline (the app shell caches; share content
@@ -139,12 +167,14 @@ build the static export with that key, and tear it all down afterward.
 ```
 src/
   app/
-    page.tsx                 home: create a share (text or file) → upload to OpenList
+    page.tsx                 home: create a share (text or file) → upload to OpenList;
+                             includes the OpenList connection panel (runtime URL + API key)
     s/page.tsx               share view: fetch raw_url, render viewer, download, delete
     layout.tsx               PWA manifest, theme color, service-worker registration
     sw-register.tsx          client-side SW registration
   lib/
-    config.ts                build-time NEXT_PUBLIC_* config
+    config.ts                layered config: build-time NEXT_PUBLIC_* + runtime
+                             connection saved in localStorage (overrides build-time)
     openlist-client.ts       browser OpenList client (API key, upload, get, remove)
     share-utils.ts           type detection, id, sanitize, expiry presets
   __tests__/

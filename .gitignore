@@ -86,6 +86,8 @@ web_modules/
 # Next.js build output
 .next
 out
+# e2e harness copy of an unconfigured static build (src/__tests__/harness/next-app.ts)
+out-unconfigured
 
 # Nuxt.js build / generate output
 .nuxt
