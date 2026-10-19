@@ -17,6 +17,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.PSHARE_E2E_URL || "http://127.0.0.1:3137",
     trace: "on-first-retry",
+    // The TLS-served bundle (mixed-content spec) uses a self-signed cert.
+    ignoreHTTPSErrors: true,
   },
   projects: [
     {

@@ -14,11 +14,14 @@
  * variant serves its own snapshot copy (out-configured/, out-unconfigured/,
  * out-basepath/) — the servers read files from disk on every request.
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { cp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtempSync, readFileSync } from "node:fs";
 import path from "node:path";
 import net from "node:net";
+import os from "node:os";
 
 export type StaticSite = {
   baseUrl: string;
@@ -103,6 +106,65 @@ function buildStatic(root: string, env: NodeJS.ProcessEnv): Promise<void> {
     );
     build.on("error", reject);
   });
+}
+
+/** One self-signed cert per process for the TLS harness (tests only). */
+let tlsCerts: { key: string; cert: string } | null = null;
+
+/**
+ * Generate (once) a self-signed certificate for https://127.0.0.1, so specs
+ * can run against a secure page context without a CA. Chromium accepts it via
+ * Playwright's ignoreHTTPSErrors.
+ */
+function selfSignedCert(): { key: string; cert: string } {
+  if (tlsCerts) return tlsCerts;
+  const dir = mkdtempSync(path.join(os.tmpdir(), "pshare-tls-"));
+  const keyPath = path.join(dir, "key.pem");
+  const certPath = path.join(dir, "cert.pem");
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=127.0.0.1",
+      "-addext",
+      "subjectAltName=IP:127.0.0.1",
+      "-keyout",
+      keyPath,
+      "-out",
+      certPath,
+    ],
+    { stdio: "ignore" },
+  );
+  tlsCerts = { key: readFileSync(keyPath, "utf8"), cert: readFileSync(certPath, "utf8") };
+  return tlsCerts;
+}
+
+/**
+ * Serve an already-built bundle snapshot over HTTPS with a self-signed cert —
+ * a secure page context (https:// origin), which http servers can't provide.
+ * Used by the mixed-content spec: an https page pointed at an http:// OpenList
+ * backend is exactly the deployment shape that browsers block (and that pshare
+ * must diagnose as mixed content rather than an outage). Requires Playwright's
+ * ignoreHTTPSErrors to load.
+ */
+export async function startTlsStaticSite(outDir: string, port?: number): Promise<StaticSite> {
+  const actualPort = port ?? (await freePort());
+  const { key, cert } = selfSignedCert();
+  const server = createHttpsServer({ key, cert }, (req, res) => serveStatic(outDir, req, res));
+  await new Promise<void>((r) => server.listen(actualPort, "127.0.0.1", r));
+  return {
+    baseUrl: `https://127.0.0.1:${actualPort}`,
+    teardown: async () => {
+      await new Promise<void>((r) => server.close(() => r()));
+    },
+  };
 }
 
 async function serveOutDir(outDir: string, port?: number, basePath?: string): Promise<StaticSite> {

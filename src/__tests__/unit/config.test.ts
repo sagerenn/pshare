@@ -9,6 +9,7 @@ import {
   resetConfig,
   isConfigured,
   withBasePath,
+  isMixedContent,
 } from "@/lib/config";
 
 /**
@@ -83,6 +84,46 @@ describe("base path (sub-path deployments)", () => {
     process.env.NEXT_PUBLIC_BASE_PATH = "/pshare/";
     resetConfig();
     expect(loadConfig().basePath).toBe("/pshare");
+  });
+});
+
+describe("isMixedContent (HTTPS page → http:// backend)", () => {
+  // The unit environment is node, so like the localStorage stub in setup.ts a
+  // minimal window is installed per test: isMixedContent only reads
+  // location.protocol. Deleting it again simulates prerender (no window).
+  const setPageProtocol = (protocol: string) => {
+    (globalThis as { window?: { location: { protocol: string } } }).window = {
+      location: { protocol },
+    };
+  };
+
+  afterEach(() => {
+    delete (globalThis as { window?: object }).window;
+  });
+
+  it("is false during prerender (no window), whatever the backend scheme", () => {
+    expect(isMixedContent("http://ol.example.com")).toBe(false);
+    expect(isMixedContent("https://ol.example.com")).toBe(false);
+  });
+
+  it("is false on an http:// page regardless of the backend scheme", () => {
+    setPageProtocol("http:");
+    expect(isMixedContent("http://ol.example.com")).toBe(false);
+    expect(isMixedContent("https://ol.example.com")).toBe(false);
+  });
+
+  it("is true only for an http:// backend from an https:// page", () => {
+    setPageProtocol("https:");
+    expect(isMixedContent("http://61.29.254.107:5245")).toBe(true);
+    expect(isMixedContent("http://ol.example.com/")).toBe(true);
+    expect(isMixedContent("https://ol.example.com")).toBe(false);
+  });
+
+  it("never throws on malformed base URLs", () => {
+    setPageProtocol("https:");
+    expect(isMixedContent("")).toBe(false);
+    expect(isMixedContent("not a url")).toBe(false);
+    expect(isMixedContent("ftp://weird")).toBe(false);
   });
 });
 

@@ -185,3 +185,21 @@ export function withBasePath(path: string): string {
 export function siteUrl(path: string): string {
   return `${window.location.origin}${withBasePath(path)}`;
 }
+
+/**
+ * True when this page is served over HTTPS but the OpenList base URL is plain
+ * http://. Browsers block such cross-scheme fetches outright — "mixed active
+ * content" — so the request never leaves the page and fetch rejects with a
+ * generic TypeError, which otherwise looks exactly like "OpenList is down".
+ * Callers use this to surface the real cause. Fix by serving OpenList over
+ * HTTPS, serving this site over plain HTTP, or (per-browser) allowing
+ * insecure content for the site.
+ */
+export function isMixedContent(base: string): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    return window.location.protocol === "https:" && new URL(base).protocol === "http:";
+  } catch {
+    return false;
+  }
+}

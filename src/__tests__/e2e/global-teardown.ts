@@ -8,6 +8,7 @@ export default async function globalTeardown() {
     __e2eSite?: StaticSite;
     __e2eUnconfigured?: StaticSite;
     __e2eBasepath?: StaticSite;
+    __e2eTls?: StaticSite;
   };
   try {
     if (g.__e2eSite) await g.__e2eSite.teardown();
@@ -17,6 +18,9 @@ export default async function globalTeardown() {
   } catch {}
   try {
     if (g.__e2eBasepath) await g.__e2eBasepath.teardown();
+  } catch {}
+  try {
+    if (g.__e2eTls) await g.__e2eTls.teardown();
   } catch {}
   try {
     if (g.__e2eOl) await g.__e2eOl.teardown();

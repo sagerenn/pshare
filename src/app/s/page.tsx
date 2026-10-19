@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { formatBytes, detectType, isMarkdown } from "@/lib/share-utils";
 import { OpenListClient, OpenListError, type FileInfo } from "@/lib/openlist-client";
-import { loadConfig, isConfigured, withBasePath } from "@/lib/config";
+import { loadConfig, isConfigured, withBasePath, isMixedContent } from "@/lib/config";
 
 type State =
   | { kind: "loading" }
@@ -66,7 +66,16 @@ export default function ShareView() {
               : `Failed to load share: ${e.message} (code ${e.code})`,
           });
         } else {
-          setState({ kind: "error", message: (e as Error).message });
+          // A fetch TypeError here means the browser couldn't reach OpenList —
+          // either a genuine network failure or mixed content (HTTPS page, http
+          // backend), where the browser blocks the request before it starts.
+          const mixed = isMixedContent(cfg.openlistBaseUrl);
+          setState({
+            kind: "error",
+            message: mixed
+              ? "Failed to load share: the browser blocks requests from this HTTPS page to an http:// OpenList URL (mixed content). Serve OpenList over HTTPS, or allow insecure content for this site."
+              : `Failed to load share: ${(e as Error).message}`,
+          });
         }
       });
     return () => {

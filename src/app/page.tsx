@@ -11,6 +11,7 @@ import {
   hasRuntimeConnection,
   siteUrl,
   withBasePath,
+  isMixedContent,
   type Config,
 } from "@/lib/config";
 
@@ -110,7 +111,9 @@ export default function Home() {
         // CORS middleware runs, so the browser hides the 401 response and
         // fetch rejects with a generic "Failed to fetch".
         setError(
-          "upload failed: could not reach OpenList — check the URL, that the backend is running, and that the API key is valid",
+          isMixedContent(cfg.openlistBaseUrl)
+            ? "upload failed: the browser blocks requests from this HTTPS page to an http:// OpenList URL (mixed content) — serve OpenList over HTTPS"
+            : "upload failed: could not reach OpenList — check the URL, that the backend is running, and that the API key is valid",
         );
       } else {
         setError((e as Error).message);
@@ -303,8 +306,14 @@ function ConnectionSettings({
         // A fetch TypeError covers unreachable URLs, down backends, and —
         // because OpenList's auth middleware aborts before its CORS
         // middleware runs — rejected keys, whose 401 the browser hides as
-        // a generic network error.
-        text = `Failed: could not reach ${base} — the URL may be wrong, OpenList may be down, or the API key may have been rejected.`;
+        // a generic network error. Check the mixed-content case first: it
+        // mimics an outage exactly (the browser kills the request before
+        // it starts) but has a different fix.
+        if (isMixedContent(base)) {
+          text = `Failed: the browser blocks requests from this HTTPS page to ${base} (mixed content). Serve OpenList over HTTPS — or allow insecure content for this site in your browser settings.`;
+        } else {
+          text = `Failed: could not reach ${base} — the URL may be wrong, OpenList may be down, or the API key may have been rejected.`;
+        }
       }
       setMessage({ ok: false, text });
     } finally {
