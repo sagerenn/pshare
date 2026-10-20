@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { formatBytes, detectType, isMarkdown } from "@/lib/share-utils";
-import { OpenListClient, OpenListError, type FileInfo } from "@/lib/openlist-client";
+import {
+  OpenListClient,
+  OpenListError,
+  resolveRawUrl,
+  type FileInfo,
+} from "@/lib/openlist-client";
 import { loadConfig, isConfigured, withBasePath, isMixedContent } from "@/lib/config";
 
 type State =
@@ -301,11 +306,5 @@ function DeleteButton({ id, name }: { id: string; name: string }) {
 }
 
 /**
- * OpenList's `raw_url` may be a relative proxied path (e.g. `/p/...?sign=...`)
- * or an absolute pre-signed storage URL. Relative paths must be resolved
- * against the OpenList base URL; absolute URLs are used as-is.
+ * (moved to lib/openlist-client.ts — resolveRawUrl — so it is unit-testable)
  */
-function resolveRawUrl(base: string, raw: string): string {
-  if (/^https?:\/\//i.test(raw)) return raw;
-  return `${base.replace(/\/+$/, "")}${raw.startsWith("/") ? raw : `/${raw}`}`;
-}

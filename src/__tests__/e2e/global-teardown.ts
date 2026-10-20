@@ -1,6 +1,7 @@
 /** Playwright global teardown: stop the static site servers and the OpenList binary. */
 import type { Harness } from "@/__tests__/harness/openlist-bin";
 import type { StaticSite } from "@/__tests__/harness/next-app";
+import type { PrefixProxy } from "@/__tests__/harness/prefix-proxy";
 
 export default async function globalTeardown() {
   const g = globalThis as unknown as {
@@ -9,6 +10,7 @@ export default async function globalTeardown() {
     __e2eUnconfigured?: StaticSite;
     __e2eBasepath?: StaticSite;
     __e2eTls?: StaticSite;
+    __e2eOlProxy?: PrefixProxy;
   };
   try {
     if (g.__e2eSite) await g.__e2eSite.teardown();
@@ -21,6 +23,9 @@ export default async function globalTeardown() {
   } catch {}
   try {
     if (g.__e2eTls) await g.__e2eTls.teardown();
+  } catch {}
+  try {
+    if (g.__e2eOlProxy) await g.__e2eOlProxy.teardown();
   } catch {}
   try {
     if (g.__e2eOl) await g.__e2eOl.teardown();

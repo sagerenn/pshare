@@ -170,3 +170,123 @@ describe("OpenListClient.upload", () => {
     await expect(c.get("/pshare/a")).rejects.toMatchObject({ code: 502 });
   });
 });
+
+/**
+ * resolveRawUrl: mapping the raw_url OpenList returns onto a URL the
+ * visitor's browser can fetch. The cases mirror real deployment shapes,
+ * verified against a live OpenList behind prefix-stripping and pass-through
+ * reverse proxies:
+ *
+ *  - root deployment: absolute raw_url at the same origin — untouched.
+ *  - sub-path behind a strip-mode proxy (Caddy handle_path), site_url unset:
+ *    raw_url is the BACKEND origin + /p/... → rebase onto the public base.
+ *  - sub-path, site_url set to the backend path: raw_url carries backend
+ *    origin + the path prefix → rebase onto the public base origin.
+ *  - sub-path, site_url set to the full public URL: raw_url is already the
+ *    public URL → untouched.
+ *  - https public proxy in front of an http backend: raw_url is http://
+ *    backend/p/... → rebased onto the https base (also fixes mixed content).
+ *  - external pre-signed storage URL (S3/OSS) or CDN — untouched, whatever
+ *    its origin or path.
+ */
+import { resolveRawUrl } from "@/lib/openlist-client";
+
+describe("resolveRawUrl", () => {
+  it("joins relative proxied paths onto the base (root or sub-path)", () => {
+    expect(resolveRawUrl("http://ol.test", "/p/pshare/a/b.txt?sign=s")).toBe(
+      "http://ol.test/p/pshare/a/b.txt?sign=s",
+    );
+    expect(resolveRawUrl("https://host.example/openlist", "/p/pshare/a/b.txt?sign=s")).toBe(
+      "https://host.example/openlist/p/pshare/a/b.txt?sign=s",
+    );
+    expect(resolveRawUrl("http://ol.test/", "p/x")).toBe("http://ol.test/p/x");
+  });
+
+  it("passes through a root deployment's absolute raw_url unchanged", () => {
+    expect(resolveRawUrl("http://ol.test", "http://ol.test/p/pshare/a/b.txt?sign=s")).toBe(
+      "http://ol.test/p/pshare/a/b.txt?sign=s",
+    );
+  });
+
+  it("passes through a fully-correct public absolute raw_url (site_url set)", () => {
+    expect(
+      resolveRawUrl(
+        "https://host.example/openlist",
+        "https://host.example/openlist/p/pshare/a/b.txt?sign=s",
+      ),
+    ).toBe("https://host.example/openlist/p/pshare/a/b.txt?sign=s");
+  });
+
+  it("rebases the backend origin onto the public base (strip-mode proxy, no site_url)", () => {
+    // Caddy handle_path strips /openlist; OpenList emits its loopback origin.
+    expect(
+      resolveRawUrl(
+        "http://127.0.0.1:5400/openlist",
+        "http://127.0.0.1:5401/p/pshare/abcdefghij/hello.txt?sign=s",
+      ),
+    ).toBe("http://127.0.0.1:5400/openlist/p/pshare/abcdefghij/hello.txt?sign=s");
+  });
+
+  it("rebases backend origin + backend path prefix onto the public base (site_url set to the path)", () => {
+    expect(
+      resolveRawUrl(
+        "http://127.0.0.1:5402/openlist",
+        "http://127.0.0.1:5403/openlist/p/pshare/a/hello.txt?sign=s",
+      ),
+    ).toBe("http://127.0.0.1:5402/openlist/p/pshare/a/hello.txt?sign=s");
+  });
+
+  it("adds the sub-path prefix when the same-origin raw_url lacks it", () => {
+    // site_url set to the bare public origin, missing the /openlist prefix.
+    expect(
+      resolveRawUrl(
+        "https://host.example/openlist",
+        "https://host.example/p/pshare/a/b.txt?sign=s",
+      ),
+    ).toBe("https://host.example/openlist/p/pshare/a/b.txt?sign=s");
+    // Also for the /d direct-download route.
+    expect(resolveRawUrl("https://host.example/openlist", "https://host.example/d/pshare/a")).toBe(
+      "https://host.example/openlist/d/pshare/a",
+    );
+  });
+
+  it("rebases an http backend raw_url onto an https base (proxy terminates TLS)", () => {
+    expect(
+      resolveRawUrl(
+        "https://host.example/openlist",
+        "http://127.0.0.1:5244/p/pshare/a/b.txt?sign=s",
+      ),
+    ).toBe("https://host.example/openlist/p/pshare/a/b.txt?sign=s");
+  });
+
+  it("leaves external pre-signed storage URLs untouched", () => {
+    // S3-style path URL that happens to start with /p/ (bucket "p"): the
+    // query has no bare `sign` param, so it is recognized as external.
+    expect(
+      resolveRawUrl("https://host.example/openlist", "https://s3.example.com/p/key?X-Amz-S=1"),
+    ).toBe("https://s3.example.com/p/key?X-Amz-S=1");
+    expect(
+      resolveRawUrl("https://host.example/openlist", "https://cdn.example.net/files/a/b.bin"),
+    ).toBe("https://cdn.example.net/files/a/b.bin");
+    // Same-origin but not an OpenList download route (e.g. a CDN path on the
+    // same host) — untouched rather than blindly prefixed.
+    expect(resolveRawUrl("https://host.example/openlist", "https://host.example/other/x")).toBe(
+      "https://host.example/other/x",
+    );
+  });
+
+  it("rebases a parameterless OpenList /d route (sign not required)", () => {
+    // enable_sign off → the direct route carries no query at all; it is
+    // still an OpenList route and must go through the public base.
+    expect(
+      resolveRawUrl("https://host.example/openlist", "http://127.0.0.1:5244/d/pshare/a/b.bin"),
+    ).toBe("https://host.example/openlist/d/pshare/a/b.bin");
+  });
+
+  it("handles malformed input without throwing", () => {
+    // A garbage raw_url falls into the relative branch (joins onto the base);
+    // an unparseable base falls back to the raw URL as-is.
+    expect(resolveRawUrl("http://ol.test", "::::")).toBe("http://ol.test/::::");
+    expect(resolveRawUrl("not a base", "http://ol.test/p/a")).toBe("http://ol.test/p/a");
+  });
+});

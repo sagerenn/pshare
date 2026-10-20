@@ -58,6 +58,34 @@ There are two ways to tell pshare where OpenList lives:
 
 Runtime values override the build-time ones when both exist.
 
+### OpenList behind a reverse-proxy sub-path (Caddy / nginx / httpd …)
+
+pshare fully supports an OpenList reachable under a URL prefix, e.g.
+`https://example.com/openlist/` — enter the **public URL including the
+prefix** as the OpenList URL (build time or connection panel). API calls
+carry the prefix automatically, and the signed download URLs OpenList
+returns are rebased onto the public URL, so previews, playback, and
+downloads work: OpenList mints those URLs from its *own* origin (its
+`site_url` or loopback address — e.g. `http://127.0.0.1:5244/p/…`), which a
+visitor's browser could never reach, so pshare maps them onto the base URL
+it just used successfully.
+
+Both common proxy styles work:
+
+- **Prefix-stripping** (Caddy `handle_path /openlist/*`, nginx
+  `location /openlist/ { proxy_pass http://backend/; }` — note the trailing
+  slash, httpd `ProxyPass /openlist/ http://backend/`): the proxy removes
+  `/openlist` before forwarding. No OpenList setting is required.
+- **Pass-through** (nginx `proxy_pass http://backend;` without a path):
+  the prefix is forwarded untouched — configure OpenList's `site_url` with
+  the same prefix (e.g. `-site-url /openlist`, or
+  `https://example.com/openlist`) so it serves its routes under it.
+
+Pre-signed URLs from storage drivers (S3/OSS/CDN links) are left untouched —
+only OpenList's own `/p/` (web proxy) and `/d/` (direct) routes are rebased,
+so `web_proxy: on` on the pshare mount is still recommended for inline media
+preview.
+
 ## Quick start
 
 ### 1. Run the OpenList backend

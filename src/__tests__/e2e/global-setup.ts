@@ -22,16 +22,24 @@ import {
   startTlsStaticSite,
   type StaticSite,
 } from "@/__tests__/harness/next-app";
+import { startPrefixProxy, type PrefixProxy } from "@/__tests__/harness/prefix-proxy";
 
 let ol: Harness;
 let site: StaticSite;
 let unconfigured: StaticSite;
 let basepath: StaticSite;
 let tls: StaticSite | null = null;
+let olProxy: PrefixProxy | null = null;
 
 export default async function globalSetup() {
   await ensureBinary();
   ol = await bootOpenList();
+
+  // A prefix-stripping reverse proxy in front of the same OpenList (the
+  // Caddy handle_path / nginx-proxy_pass-with-slash shape): the sub-path
+  // e2e drives the whole share journey through /openlist.
+  const olPort = Number(new URL(ol.baseUrl).port);
+  olProxy = await startPrefixProxy({ targetPort: olPort, prefix: "/openlist", port: 3141 });
 
   // Each variant serves its own snapshot of out/ (out-unconfigured/,
   // out-configured/, out-basepath/), so the order of these builds doesn't
@@ -57,20 +65,23 @@ export default async function globalSetup() {
     __e2eUnconfigured: StaticSite;
     __e2eBasepath: StaticSite;
     __e2eTls: StaticSite | null;
+    __e2eOlProxy: PrefixProxy | null;
   }).__e2eOl = ol;
   (globalThis as unknown as { __e2eSite: StaticSite }).__e2eSite = site;
   (globalThis as unknown as { __e2eUnconfigured: StaticSite }).__e2eUnconfigured = unconfigured;
   (globalThis as unknown as { __e2eBasepath: StaticSite }).__e2eBasepath = basepath;
   (globalThis as unknown as { __e2eTls: StaticSite | null }).__e2eTls = tls;
+  (globalThis as unknown as { __e2eOlProxy: PrefixProxy | null }).__e2eOlProxy = olProxy;
   process.env.PSHARE_E2E_URL = site.baseUrl;
   process.env.PSHARE_E2E_UNCONFIGURED_URL = unconfigured.baseUrl;
   process.env.PSHARE_E2E_BASEPATH_URL = basepath.baseUrl;
   process.env.PSHARE_E2E_OL_URL = ol.baseUrl;
   process.env.PSHARE_E2E_OL_KEY = ol.apiKey;
   if (tls) process.env.PSHARE_E2E_TLS_URL = tls.baseUrl;
+  if (olProxy) process.env.PSHARE_E2E_OL_PROXY_URL = olProxy.baseUrl;
 
   // eslint-disable-next-line no-console
   console.log(
-    `e2e ready: site=${site.baseUrl} unconfigured=${unconfigured.baseUrl} basepath=${basepath.baseUrl} tls=${tls.baseUrl} openlist=${ol.baseUrl}`,
+    `e2e ready: site=${site.baseUrl} unconfigured=${unconfigured.baseUrl} basepath=${basepath.baseUrl} tls=${tls.baseUrl} olproxy=${olProxy.baseUrl} openlist=${ol.baseUrl}`,
   );
 }
